@@ -112,6 +112,16 @@ struct CLSTMOCR {
   int nclasses = -1;
   Sequence aligned, targets;
   mdarray<float> image;
+  CLSTMOCR()
+  {
+	unique_ptr<INormalizer> normalizer;
+	Network net;
+	target_height = 48;
+	nclasses = -1;
+	Sequence aligned, targets;
+	mdarray<float> image;
+  }
+  
   void setLearningRate(float lr, float mom) { net->setLearningRate(lr, mom); }
   void load(const std::string &fname) {
     net = load_net(fname);

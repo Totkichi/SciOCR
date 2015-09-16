@@ -1,0 +1,1 @@
+std::string ocr( const std::vector<cv::Rect> &, const cv::Mat &, ocropus::CLSTMOCR & );

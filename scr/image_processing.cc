@@ -15,17 +15,40 @@
 #define SSTR( x ) dynamic_cast< std::ostringstream & >( \
         ( std::ostringstream() << std::dec << x ) ).str()
 
-
-void help(void){
-	std::cout << "\nThis program is designed for shredding image that containing text.\n"
-	"Usage:\n"
-	"./SOCR -S, Get image from screen\n"
-	"./SOCR -S -F, Get image from screen and save it to ./img\n"
-	"./SOCR -L <image>, Load image from file\n"
-	"./SOCR -L <image> -T <text>, Load image and text from file\n"<< std::endl;
+int preprocessing( Mat & sourceImage, Mat & processed)
+{
+	int winx=0, winy=0;
+	float optK=0.5;
+	NiblackVersion versionCode=WOLFJOLION;
+	Mat grayImage;
+	
+	/// Resize gray image for better thresholding and recognition
+	resize(sourceImage, grayImage, Size(), 2, 2, INTER_CUBIC);
+	
+	/// Convert the image to Gray
+	cvtColor( grayImage, grayImage, CV_RGB2GRAY );
+	
+	/// Treat the window size
+	if (winx==0||winy==0) {
+		winy = (int) (2.0 * grayImage.rows-1)/3;
+		winx = (int) grayImage.cols-1 < winy ? grayImage.cols-1 : winy;
+		/// if the window is too big, than we asume that the image
+		/// is not a single text box, but a document page: set
+		/// the window size to a fixed constant.
+		if (winx > 100)
+		    winx = winy = 40;
+	}
+	
+	Mat binImage (grayImage.rows, grayImage.cols, CV_8U);
+	/// Threshold resized image
+	NiblackSauvolaWolfJolion(grayImage, binImage, versionCode, winx, winy, optK, 128);
+	
+	copyMakeBorder(binImage, processed, 5, 5, 5, 5, BORDER_CONSTANT, Scalar(255, 255, 255));
+	
+	return 0;
 }
 
-int saveShred( const vector<Rect> & boundLineRect, const Mat & sourceImage, const char* textFile )
+int saveShred( const vector<Rect> & boundLineRect, const Mat & processed, const char* textFile )
 {
 	vector<std::string> text;
 	std::string line;
@@ -58,16 +81,16 @@ int saveShred( const vector<Rect> & boundLineRect, const Mat & sourceImage, cons
 		{
 		    parentName.erase(period_idx);
 		}
-		const std::string folder = "./shredded/" + parentName;
+		const std::string folder = "./data/book/shredded/" + parentName;
 		mkdir(folder.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		for(int i=0; i<text.size(); i++)
 		{
-			const std::string textName = "./shredded/" + parentName + "/" + SSTR(i) + ".gt.txt";
-			const std::string imgName = "./shredded/" + parentName + "/" + SSTR(i) + ".bin.png";
+			const std::string textName = "./data/book/shredded/" + parentName + "/" + SSTR(i) + ".gt.txt";
+			const std::string imgName = "./data/book/shredded/" + parentName + "/" + SSTR(i) + ".bin.png";
 			fout.open(textName.c_str());
 			fout << text[i];
 			fout.close();
-			imwrite(imgName, sourceImage(boundLineRect[i]), cvPNG);
+			imwrite(imgName, processed(boundLineRect[i]), cvPNG);
 		}
 	} else {
 		printf("Mismatch string count: recognized %i string on image but %i in file\n", boundLineRect.size(), text.size());
@@ -77,38 +100,15 @@ int saveShred( const vector<Rect> & boundLineRect, const Mat & sourceImage, cons
 	return 0;
 }
 
-int shredder( vector<Rect> & rectBoundStr, Mat & sourceImage )
+int shredder( vector<Rect> & rectBoundStr, Mat & processed )
 {
-	int winx=0, winy=0;
-	float optK=0.5;
-	NiblackVersion versionCode=WOLFJOLION;
-	
+	Mat binImage;
+	processed.copyTo(binImage);
 	vector<vector<Point> > contours;
 	vector<Vec4i> hierarchy;
 	
-	Mat grayImage;
-	
-	/// Resize gray image for better thresholding and recognition
-	resize(sourceImage, sourceImage, Size(), 2, 2, INTER_CUBIC);
-	
-	/// Convert the image to Gray
-	cvtColor( sourceImage, grayImage, CV_RGB2GRAY );
-	
-	/// Treat the window size
-	if (winx==0||winy==0) {
-		winy = (int) (2.0 * grayImage.rows-1)/3;
-		winx = (int) grayImage.cols-1 < winy ? grayImage.cols-1 : winy;
-		/// if the window is too big, than we asume that the image
-		/// is not a single text box, but a document page: set
-		/// the window size to a fixed constant.
-		if (winx > 100)
-		    winx = winy = 40;
-	}
-	
-	Mat binImage (grayImage.rows, grayImage.cols, CV_8U);
-	/// Threshold resized image
-	//adaptiveThreshold(grayImage, binImage, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 7, 1);
-	NiblackSauvolaWolfJolion (grayImage, binImage, versionCode, winx, winy, optK, 128);
+	if( !rectBoundStr.empty() )
+		rectBoundStr.erase(rectBoundStr.begin(), rectBoundStr.end());
 	
 	/// Find contours
 	findContours( binImage, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_TC89_L1, Point(0, 0) );
@@ -128,16 +128,16 @@ int shredder( vector<Rect> & rectBoundStr, Mat & sourceImage )
 	//Scalar red = Scalar( 27, 27, 237 );
 	//Mat tmp;
 	
-	//sourceImage.copyTo(tmp);
+	//processed.copyTo(tmp);
 	boundLineRect.insert(boundLineRect.end(), boundRect[1]);
 	//namedWindow("Display window", WINDOW_AUTOSIZE);
 	for( int i=1; i<boundRect.size(); i++ )
 	{
-		//tmp.copyTo(sourceImage);
+		//tmp.copyTo(processed);
 		bool fit = false;
 		vector<int> fitCount;
 		unsigned int numberLines = boundLineRect.size();
-		//rectangle( sourceImage, boundRect[i].tl(), boundRect[i].br(), blu, 1, 8, 0 );
+		//rectangle( processed, boundRect[i].tl(), boundRect[i].br(), blu, 1, 8, 0 );
 		for( int j=0; j<numberLines; j++ )
 		{
 			if( boundLineRect[j].y <= boundRect[i].y and boundLineRect[j].y + boundLineRect[j].height >= boundRect[i].y + boundRect[i].height ) {
@@ -207,7 +207,7 @@ int shredder( vector<Rect> & rectBoundStr, Mat & sourceImage )
 					fitCount.push_back(j);
 				}
 			}
-			//rectangle( sourceImage, boundLineRect[j].tl(), boundLineRect[j].br(), red, 1, 8, 0 );
+			//rectangle( processed, boundLineRect[j].tl(), boundLineRect[j].br(), red, 1, 8, 0 );
 		}
 		if( fit == false )
 			boundLineRect.push_back(boundRect[i]);
@@ -222,7 +222,7 @@ int shredder( vector<Rect> & rectBoundStr, Mat & sourceImage )
 			for(int k=1; k<fitCount.size(); k++) 
 				boundLineRect.erase(boundLineRect.begin() + fitCount[k]);
 		}
-		//imshow("Display window", sourceImage);	
+		//imshow("Display window", processed);	
 		//waitKey(0);
 	}
 	
@@ -255,35 +255,34 @@ int shredder( vector<Rect> & rectBoundStr, Mat & sourceImage )
 	for( int i = 0; i< rectBoundStr.size(); i++ )
 	{
 		//drawContours( src, contours_poly, i, color, 1, 8, vector<Vec4i>(), 0, Point() );
-		rectangle( sourceImage, rectBoundStr[i].tl(), rectBoundStr[i].br(), red, 1, 8, 0 );
+		rectangle( processed, rectBoundStr[i].tl(), rectBoundStr[i].br(), red, 1, 8, 0 );
 	}
 	
 	namedWindow("Display window", WINDOW_AUTOSIZE);
-        imshow("Display window", sourceImage);	
+        imshow("Display window", processed);	
         waitKey(0);
 	//*/
 	
 	return 0;
 }
 
-int createName( std::string & name, const std::string & ext )
+int createName( std::string & name, const std::string & ext, const char* folder )
 {
 	int len, i=0;
 	DIR *dir;
 	struct dirent *ent;
-	if ((dir = opendir ("./img")) != NULL) {
+	if ((dir = opendir (folder)) != NULL) {
 		/* print all the files and directories within directory */
 		while ((ent = readdir (dir)) != NULL) {
 			const std::string fname = ent->d_name;
 			len = fname.length();
 			if (len >= ext.length()) {
 				if ( !fname.compare(len-ext.length(), ext.length(), ext) ) {
-					//printf ("%s\n", fname.c_str());
 					i++;
 				}
 			}
 		}
-		name = "./img/" + SSTR(i) + ext;
+		name = folder + SSTR(i) + ext;
 		closedir (dir);
 	} else {
 		/* could not open directory */
@@ -294,7 +293,7 @@ int createName( std::string & name, const std::string & ext )
 	return 0;
 }
 
-int getScreen( Mat & Image )
+int getScreen( Mat & sourceImage )
 {
 	int rx, ry, rw, rh;
 	int rect_x = 0, rect_y = 0, rect_w = 0, rect_h = 0;
@@ -332,17 +331,21 @@ int getScreen( Mat & Image )
 	if (XGrabPointer(
 		defaultDisplay, root, false,
 		ButtonMotionMask | ButtonPressMask | ButtonReleaseMask, GrabModeAsync,
-		GrabModeAsync, root, arrow, CurrentTime)	!=	GrabSuccess)
-		printf("couldn't grab pointer:");
+		GrabModeAsync, root, arrow, CurrentTime)	!=	GrabSuccess) {
+		printf("couldn't grab pointer\n");
+		return EXIT_FAILURE;
+	}
 
 	if (XGrabKeyboard(
 		defaultDisplay, root, false, GrabModeAsync, GrabModeAsync,
-		CurrentTime)	!=	GrabSuccess)
-		printf("couldn't grab keyboard:");
+		CurrentTime)	!=	GrabSuccess) {
+		printf("couldn't grab keyboard\n");
+		return EXIT_FAILURE;
+	}
 	
 	while (!done)
 	{
-		while (!done && XPending(defaultDisplay))
+		while (!done and XPending(defaultDisplay)>0 )
 		{
 			XNextEvent(defaultDisplay, &boxDrawingEvent);
 			switch (boxDrawingEvent.type)
@@ -354,7 +357,8 @@ int getScreen( Mat & Image )
 				break;
 				
 				case ButtonRelease:
-				done = true;
+				if( btn_pressed == true )
+					done = true;
 				break;
 				
 				case MotionNotify:
@@ -384,11 +388,11 @@ int getScreen( Mat & Image )
 			}
 		}
 	}
+
 	if(rect_w*rect_h==0){
 		printf("Rectangle not selected\n");
 		return EXIT_FAILURE;
 	}
-		
 	/// Clear the drawn rectangle
 	XDrawRectangle(defaultDisplay, root, gc, rect_x, rect_y, rect_w, rect_h);
 	XFlush(defaultDisplay);
@@ -407,8 +411,8 @@ int getScreen( Mat & Image )
 	
 	XImage *Ximg = XGetImage(defaultDisplay,root, rx,ry, rw,rh, AllPlanes, ZPixmap);
 	int Bpp = Ximg->bits_per_pixel;
-	Image.create( rh, rw, Bpp > 24 ? CV_8UC4 : CV_8UC3 );
-	memcpy(Image.data, Ximg->data, rw*rh*4);
+	sourceImage.create( rh, rw, Bpp > 24 ? CV_8UC4 : CV_8UC3 );
+	memcpy(sourceImage.data, Ximg->data, rw*rh*4);
 
 	XDestroyImage(Ximg);
 	XCloseDisplay(defaultDisplay);
